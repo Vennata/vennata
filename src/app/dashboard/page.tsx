@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { totalHours } from "@/lib/stats/meetings";
+import { formatDecimal } from "@/lib/format";
 import { signOut } from "../auth/actions";
 import { syncNow } from "../connections/actions";
 
@@ -101,7 +102,7 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
       {meetings && meetings.length > 0 && (
         <section className="grid grid-cols-3 gap-3 text-center">
           <Stat label="meetings" value={meetings.length} />
-          <Stat label="meeting hours" value={meetingHours.toFixed(1)} />
+          <Stat label="meeting hours" value={formatDecimal(meetingHours)} />
           <Stat label="biggest meeting" value={biggest} />
           <p className="col-span-3 text-xs text-neutral-500">Last 30 days, overlaps counted once</p>
         </section>
