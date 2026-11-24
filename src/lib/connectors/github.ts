@@ -128,25 +128,57 @@ async function installedRepos(token: string): Promise<string[]> {
   return [...new Set(lists.flat().map((r) => r.full_name.toLowerCase()))];
 }
 
-interface GitHubCommit {
-  sha: string;
-  parents: unknown[];
-  commit: { author: { date: string } };
+interface HistoryPage {
+  repository: {
+    defaultBranchRef: { target: { history: {
+      pageInfo: { hasNextPage: boolean; endCursor: string };
+      nodes: { oid: string; authoredDate: string; additions: number; deletions: number; parents: { totalCount: number } }[];
+    } } } | null; // null for an empty repo
+  } | null;
 }
 
-async function exactCommits(token: string, login: string, repos: string[], since: Date) {
-  const perRepo = await mapLimit(repos, 4, (repo) =>
-    getAllPages<GitHubCommit>(
-      `${API}/repos/${repo}/commits?author=${encodeURIComponent(login)}&since=${since.toISOString()}&per_page=100`,
-      token,
-    ),
-  );
+// Every commit the user authored on each repo's default branch, with line
+// counts. GraphQL returns 100 commits per request, lines included; REST would
+// need one extra request per commit just to get the line counts.
+async function exactCommits(token: string, userId: string, repos: string[], since: Date) {
+  const perRepo = await mapLimit(repos, 4, async (fullName) => {
+    const [owner, name] = fullName.split("/");
+    const nodes = [];
+    let after: string | null = null;
+    do {
+      const data: HistoryPage = await graphql(token,
+        `query($owner: String!, $name: String!, $author: ID!, $since: GitTimestamp!, $after: String) {
+          repository(owner: $owner, name: $name) {
+            defaultBranchRef { target { ... on Commit {
+              history(first: 100, after: $after, since: $since, author: { id: $author }) {
+                pageInfo { hasNextPage endCursor }
+                nodes { oid authoredDate additions deletions parents { totalCount } }
+              }
+            } } }
+          }
+        }`,
+        { owner, name, author: userId, since: since.toISOString(), after },
+      );
+      const history = data.repository?.defaultBranchRef?.target.history;
+      if (!history) break;
+      nodes.push(...history.nodes);
+      after = history.pageInfo.hasNextPage ? history.pageInfo.endCursor : null;
+    } while (after);
+    return nodes;
+  });
+
   const seen = new Set<string>(); // the same commit can appear in a fork too
   const events: ActivityEventInput[] = [];
   for (const c of perRepo.flat()) {
-    if (c.parents.length > 1 || seen.has(c.sha)) continue; // skip merge commits
-    seen.add(c.sha);
-    events.push({ kind: "commit", externalId: c.sha, startedAt: new Date(c.commit.author.date) });
+    if (c.parents.totalCount > 1 || seen.has(c.oid)) continue; // skip merge commits
+    seen.add(c.oid);
+    events.push({
+      kind: "commit",
+      externalId: c.oid,
+      startedAt: new Date(c.authoredDate),
+      linesAdded: c.additions,
+      linesRemoved: c.deletions,
+    });
   }
   return events;
 }
@@ -248,7 +280,8 @@ export const githubConnector: Connector = {
     const to = new Date();
     // contributionsCollection only accepts ranges up to one year.
     const from = new Date(Math.max(since.getTime(), to.getTime() - ONE_YEAR_MS + 60_000));
-    const { login } = await getJson<{ login: string }>("/user", token);
+    // GraphQL identifies users by "node id" (e.g. "MDQ6VXNlcjE="), not login.
+    const { node_id: userId } = await getJson<{ node_id: string }>("/user", token);
 
     const [repos, prs, reviews, cal] = await Promise.all([
       installedRepos(token),
@@ -259,7 +292,7 @@ export const githubConnector: Connector = {
     const installed = new Set(repos);
 
     // 1. EXACT: commits in repos where the app is installed.
-    const events = await exactCommits(token, login, repos, from);
+    const events = await exactCommits(token, userId, repos, from);
 
     // 2. EXACT: PRs and reviews (GitHub gives timestamps for any repo we can see).
     for (const n of prs) {

@@ -3,7 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { totalHours } from "@/lib/stats/meetings";
-import { formatDecimal } from "@/lib/format";
+import { linesOfCode } from "@/lib/stats/code";
+import { formatDecimal, formatInt } from "@/lib/format";
 import { signOut } from "../auth/actions";
 import { syncNow } from "../connections/actions";
 
@@ -81,11 +82,14 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
 
   // Supabase returns at most 1,000 rows per request, so page through them.
   // (Later, stats move into the database so we only fetch totals.)
-  const events: { kind: string; started_at: string; ended_at: string; attendee_count: number | null; quantity: number }[] = [];
+  const events: {
+    kind: string; started_at: string; ended_at: string; attendee_count: number | null;
+    quantity: number; lines_added: number | null; lines_removed: number | null;
+  }[] = [];
   for (let from = 0; ; from += 1000) {
     const { data } = await supabase
       .from("activity_events")
-      .select("kind, started_at, ended_at, attendee_count, quantity")
+      .select("kind, started_at, ended_at, attendee_count, quantity, lines_added, lines_removed")
       .gte("started_at", daysAgo(RANGES[range].days).toISOString())
       .order("id")
       .range(from, from + 999);
@@ -100,6 +104,7 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
   const commits = count("commit");
   const prsMerged = count("pr_merged");
   const reviews = count("review_given");
+  const lines = linesOfCode(events.filter((e) => e.kind === "commit"));
   // Same number as the green squares on GitHub (a merged PR isn't a new contribution).
   const githubTotal = count("commit", "pr_opened", "review_given", "contribution");
 
@@ -158,15 +163,17 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
             </div>
           )}
           {connected.has("github") && (
-            <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
-              <Stat label="GitHub contributions" value={githubTotal} />
-              <Stat label="commits" value={commits} />
-              <Stat label="PRs merged" value={prsMerged} />
-              <Stat label="reviews given" value={reviews} />
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <Stat label="GitHub contributions" value={formatInt(githubTotal)} />
+              <Stat label="commits" value={formatInt(commits)} />
+              <Stat label="PRs merged" value={formatInt(prsMerged)} />
+              <Stat label="reviews given" value={formatInt(reviews)} />
+              <Stat label="lines added" value={`+${formatInt(lines.added)}`} />
+              <Stat label="lines removed" value={`−${formatInt(lines.removed)}`} />
             </div>
           )}
           <p className="text-xs text-neutral-500">
-            Last {RANGES[range].label} · overlapping meetings counted once
+            Last {RANGES[range].label} · overlapping meetings counted once · lines only from repos with the Vennata app, huge generated commits skipped
           </p>
         </section>
       )}

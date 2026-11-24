@@ -4,3 +4,8 @@
 export function formatDecimal(n: number): string {
   return n.toFixed(2);
 }
+
+// Whole numbers get thousands separators: 48210 -> "48,210".
+export function formatInt(n: number): string {
+  return n.toLocaleString("en-US");
+}

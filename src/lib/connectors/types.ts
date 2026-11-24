@@ -34,6 +34,8 @@ export interface ActivityEventInput {
   endedAt?: Date | null;
   attendeeCount?: number | null;
   participantEmails?: string[];
+  linesAdded?: number;   // commits only
+  linesRemoved?: number;
 }
 
 export interface FetchResult {
