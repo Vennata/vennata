@@ -3,6 +3,7 @@
 // from a <form>. No API route or fetch() needed.
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { siteUrl } from "@/lib/site";
 
 export async function signInWithGoogle() {
   const supabase = await createClient();
@@ -10,7 +11,7 @@ export async function signInWithGoogle() {
     provider: "google",
     options: {
       // Where Google sends the user back after they approve.
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+      redirectTo: `${siteUrl()}/auth/callback`,
     },
   });
 
