@@ -1,10 +1,12 @@
 import "server-only";
+import { githubConnector } from "./github";
 import { googleConnector } from "./google";
 import type { Connector, Provider } from "./types";
 
 // Register each new integration here.
 const connectors: Partial<Record<Provider, Connector>> = {
   google: googleConnector,
+  github: githubConnector,
 };
 
 export function getConnector(provider: string): Connector | null {

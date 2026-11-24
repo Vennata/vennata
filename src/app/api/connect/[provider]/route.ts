@@ -18,9 +18,14 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/connect/
   // the callback belongs to a flow *we* started (prevents CSRF attacks).
   const state = randomBytes(16).toString("hex");
 
-  const response = NextResponse.redirect(
-    connector.getAuthUrl(state, redirectUriFor(connector.provider)),
-  );
+  // ?mode=install sends the user to install the app on an account/org
+  // (GitHub), instead of just authorizing.
+  const install = request.nextUrl.searchParams.get("mode") === "install";
+  const url = install && connector.getInstallUrl
+    ? connector.getInstallUrl(state)
+    : connector.getAuthUrl(state, redirectUriFor(connector.provider));
+
+  const response = NextResponse.redirect(url);
   response.cookies.set(`oauth_state_${provider}`, state, {
     httpOnly: true, // page JavaScript can't read it
     secure: process.env.NODE_ENV === "production",

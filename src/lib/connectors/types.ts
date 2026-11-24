@@ -7,7 +7,8 @@ export type Provider = "google" | "slack" | "microsoft" | "zoom" | "github";
 export type ActivityKind =
   | "meeting" | "message" | "thread_start" | "thread_reply" | "reaction"
   | "email_sent" | "doc_created" | "doc_edited"
-  | "commit" | "pr_opened" | "pr_merged" | "review_given";
+  | "commit" | "pr_opened" | "pr_merged" | "review_given"
+  | "contribution"; // GitHub daily total whose type is hidden
 
 export interface OAuthTokens {
   accessToken: string;
@@ -26,6 +27,10 @@ export interface ActivityEventInput {
   kind: ActivityKind;
   externalId: string;
   startedAt: Date;
+  // "day" = we only know the date (startedAt is midnight UTC), so stats like
+  // peak hour and after-hours must skip it. Defaults to "exact".
+  precision?: "exact" | "day";
+  quantity?: number; // how many actions this row stands for (default 1)
   endedAt?: Date | null;
   attendeeCount?: number | null;
   participantEmails?: string[];
@@ -41,6 +46,9 @@ export interface FetchResult {
 export interface Connector {
   provider: Provider;
   getAuthUrl(state: string, redirectUri: string): string;
+  // For tools installed on an org/workspace (GitHub Apps, Slack apps):
+  // where an admin (or a user, on their own account) installs the app.
+  getInstallUrl?(state: string): string;
   exchangeCode(code: string, redirectUri: string): Promise<{ tokens: OAuthTokens; account: ExternalAccount }>;
   refreshTokens(refreshToken: string): Promise<OAuthTokens>;
   fetchActivity(accessToken: string, since: Date): Promise<FetchResult>;

@@ -134,6 +134,8 @@ export async function syncConnection(connectionId: string, userId: string): Prom
     ended_at: e.endedAt?.toISOString() ?? null,
     attendee_count: e.attendeeCount ?? null,
     participant_emails: e.participantEmails ?? [],
+    precision: e.precision ?? "exact",
+    quantity: e.quantity ?? 1,
   }));
 
   // Insert in chunks so one huge request doesn't time out.

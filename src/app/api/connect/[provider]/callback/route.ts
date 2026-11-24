@@ -28,7 +28,16 @@ export async function GET(
 
   const code = searchParams.get("code");
   const state = searchParams.get("state");
-  if (!code || !state || state !== savedState) return finish("error=state");
+  const stateOk = Boolean(state) && state === savedState;
+
+  // GitHub redirects here after someone installs or reconfigures the app.
+  // If we can't verify state, ignore the code and do nothing risky: just tell
+  // the user to connect/sync, which runs through the normal checked flow.
+  if (searchParams.get("installation_id") && (!code || !stateOk)) {
+    return finish(`installed=${provider}`);
+  }
+
+  if (!code || !stateOk) return finish("error=state");
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

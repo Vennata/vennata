@@ -8,11 +8,18 @@ import { syncNow } from "../connections/actions";
 
 const MESSAGES: Record<string, string> = {
   "connected=google": "Google Calendar connected and synced.",
+  "connected=github": "GitHub connected and synced.",
+  "installed=github": "Vennata app installed on GitHub. Click Sync now (or Connect GitHub) to pull in those repos.",
   "error=cancelled": "Connection cancelled.",
   "error=state": "That connection link expired. Please try again.",
   "error=connect_failed": "Couldn't connect. Check the server logs for details.",
   "error=sync_failed": "Sync failed. Try reconnecting the tool.",
 };
+
+const AVAILABLE_TOOLS = [
+  { provider: "google", label: "Google Calendar" },
+  { provider: "github", label: "GitHub" },
+];
 
 export default function DashboardPage({ searchParams }: PageProps<"/dashboard">) {
   // Reading the session (cookies) happens at request time, so Next 16 wants
@@ -63,17 +70,25 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
     .from("connections")
     .select("id, provider, external_email, status, last_synced_at");
 
-  const { data: meetings } = await supabase
+  const { data: events } = await supabase
     .from("activity_events")
-    .select("started_at, ended_at, attendee_count")
-    .eq("kind", "meeting")
+    .select("kind, started_at, ended_at, attendee_count, quantity")
     .gte("started_at", daysAgo(30).toISOString());
 
+  const meetings = (events ?? []).filter((e) => e.kind === "meeting");
+  // quantity: one day-level row can stand for several commits.
+  const count = (...kinds: string[]) =>
+    (events ?? []).filter((e) => kinds.includes(e.kind)).reduce((n, e) => n + e.quantity, 0);
+  const commits = count("commit");
+  const prsMerged = count("pr_merged");
+  const reviews = count("review_given");
+  const githubTotal = count("commit", "pr_opened", "review_given", "contribution");
+
   const meetingHours = totalHours(
-    (meetings ?? []).map((m) => ({ start: new Date(m.started_at), end: new Date(m.ended_at) })),
+    meetings.map((m) => ({ start: new Date(m.started_at), end: new Date(m.ended_at) })),
   );
-  const biggest = Math.max(0, ...(meetings ?? []).map((m) => m.attendee_count ?? 0));
-  const hasGoogle = connections?.some((c) => c.provider === "google");
+  const biggest = Math.max(0, ...meetings.map((m) => m.attendee_count ?? 0));
+  const connected = new Set(connections?.map((c) => c.provider));
 
   return (
     <div className="space-y-8">
@@ -99,12 +114,23 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
         </div>
       </div>
 
-      {meetings && meetings.length > 0 && (
+      {(meetings.length > 0 || githubTotal > 0) && (
         <section className="grid grid-cols-3 gap-3 text-center">
-          <Stat label="meetings" value={meetings.length} />
-          <Stat label="meeting hours" value={formatDecimal(meetingHours)} />
-          <Stat label="biggest meeting" value={biggest} />
-          <p className="col-span-3 text-xs text-neutral-500">Last 30 days, overlaps counted once</p>
+          {meetings.length > 0 && (
+            <>
+              <Stat label="meetings" value={meetings.length} />
+              <Stat label="meeting hours" value={formatDecimal(meetingHours)} />
+              <Stat label="biggest meeting" value={biggest} />
+            </>
+          )}
+          {githubTotal > 0 && (
+            <>
+              <Stat label="commits" value={commits} />
+              <Stat label="PRs merged" value={prsMerged} />
+              <Stat label="reviews given" value={reviews} />
+            </>
+          )}
+          <p className="col-span-3 text-xs text-neutral-500">Last 30 days · overlapping meetings counted once</p>
         </section>
       )}
 
@@ -123,7 +149,13 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
                       : "Not synced yet"}
                 </p>
               </div>
-              <form action={syncNow}>
+              <form action={syncNow} className="flex items-center gap-3">
+                {c.provider === "github" && (
+                  // eslint-disable-next-line @next/next/no-html-link-for-pages
+                  <a href="/api/connect/github?mode=install" className="text-xs text-neutral-500 underline hover:text-foreground">
+                    Add repos or orgs
+                  </a>
+                )}
                 <input type="hidden" name="connectionId" value={c.id} />
                 <button type="submit" className="rounded-full border border-neutral-300 px-4 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900">
                   Sync now
@@ -132,17 +164,19 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
             </li>
           ))}
         </ul>
-        {!hasGoogle && (
-          // A plain <a>, not <Link>: Link would prefetch this route in the
-          // background and kick off an OAuth flow nobody clicked.
-          // eslint-disable-next-line @next/next/no-html-link-for-pages
-          <a
-            href="/api/connect/google"
-            className="mt-2 inline-block rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background hover:opacity-80"
-          >
-            Connect Google Calendar
-          </a>
-        )}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {AVAILABLE_TOOLS.filter((t) => !connected.has(t.provider)).map((t) => (
+            // A plain <a>, not <Link>: Link would prefetch this route in the
+            // background and kick off an OAuth flow nobody clicked.
+            <a
+              key={t.provider}
+              href={`/api/connect/${t.provider}`}
+              className="rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background hover:opacity-80"
+            >
+              Connect {t.label}
+            </a>
+          ))}
+        </div>
       </section>
 
       <section className="rounded-xl border border-neutral-200 p-5 dark:border-neutral-800">
