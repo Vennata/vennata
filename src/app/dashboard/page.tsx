@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { totalHours } from "@/lib/stats/meetings";
@@ -15,6 +16,12 @@ const MESSAGES: Record<string, string> = {
   "error=connect_failed": "Couldn't connect. Check the server logs for details.",
   "error=sync_failed": "Sync failed. Try reconnecting the tool.",
 };
+
+const RANGES = {
+  "30d": { label: "30 days", days: 30 },
+  "12m": { label: "12 months", days: 365 },
+} as const;
+type Range = keyof typeof RANGES;
 
 const AVAILABLE_TOOLS = [
   { provider: "google", label: "Google Calendar" },
@@ -44,8 +51,10 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
   if (!user) redirect("/");
 
   const params = await searchParams;
-  const messageKey = Object.entries(params).map(([k, v]) => `${k}=${v}`)[0];
-  const message = messageKey ? MESSAGES[messageKey] : undefined;
+  const range: Range = params.range === "12m" ? "12m" : "30d";
+  const message = Object.entries(params)
+    .map(([k, v]) => MESSAGES[`${k}=${v}`])
+    .find(Boolean);
 
   // These queries run as the signed-in user, so RLS limits them to rows
   // this person is allowed to see.
@@ -70,18 +79,28 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
     .from("connections")
     .select("id, provider, external_email, status, last_synced_at");
 
-  const { data: events } = await supabase
-    .from("activity_events")
-    .select("kind, started_at, ended_at, attendee_count, quantity")
-    .gte("started_at", daysAgo(30).toISOString());
+  // Supabase returns at most 1,000 rows per request, so page through them.
+  // (Later, stats move into the database so we only fetch totals.)
+  const events: { kind: string; started_at: string; ended_at: string; attendee_count: number | null; quantity: number }[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabase
+      .from("activity_events")
+      .select("kind, started_at, ended_at, attendee_count, quantity")
+      .gte("started_at", daysAgo(RANGES[range].days).toISOString())
+      .order("id")
+      .range(from, from + 999);
+    events.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
 
-  const meetings = (events ?? []).filter((e) => e.kind === "meeting");
+  const meetings = events.filter((e) => e.kind === "meeting");
   // quantity: one day-level row can stand for several commits.
   const count = (...kinds: string[]) =>
-    (events ?? []).filter((e) => kinds.includes(e.kind)).reduce((n, e) => n + e.quantity, 0);
+    events.filter((e) => kinds.includes(e.kind)).reduce((n, e) => n + e.quantity, 0);
   const commits = count("commit");
   const prsMerged = count("pr_merged");
   const reviews = count("review_given");
+  // Same number as the green squares on GitHub (a merged PR isn't a new contribution).
   const githubTotal = count("commit", "pr_opened", "review_given", "contribution");
 
   const meetingHours = totalHours(
@@ -114,23 +133,41 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
         </div>
       </div>
 
-      {(meetings.length > 0 || githubTotal > 0) && (
-        <section className="grid grid-cols-3 gap-3 text-center">
-          {meetings.length > 0 && (
-            <>
+      {connected.size > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">Your stats</h2>
+            <div className="flex rounded-full border border-neutral-200 p-0.5 text-sm dark:border-neutral-800">
+              {(Object.keys(RANGES) as Range[]).map((r) => (
+                <Link
+                  key={r}
+                  href={`/dashboard?range=${r}`}
+                  className={`rounded-full px-3 py-1 ${r === range ? "bg-foreground text-background" : "text-neutral-500"}`}
+                >
+                  {RANGES[r].label}
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {connected.has("google") && (
+            <div className="grid grid-cols-3 gap-3 text-center">
               <Stat label="meetings" value={meetings.length} />
               <Stat label="meeting hours" value={formatDecimal(meetingHours)} />
               <Stat label="biggest meeting" value={biggest} />
-            </>
+            </div>
           )}
-          {githubTotal > 0 && (
-            <>
+          {connected.has("github") && (
+            <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
+              <Stat label="GitHub contributions" value={githubTotal} />
               <Stat label="commits" value={commits} />
               <Stat label="PRs merged" value={prsMerged} />
               <Stat label="reviews given" value={reviews} />
-            </>
+            </div>
           )}
-          <p className="col-span-3 text-xs text-neutral-500">Last 30 days · overlapping meetings counted once</p>
+          <p className="text-xs text-neutral-500">
+            Last {RANGES[range].label} · overlapping meetings counted once
+          </p>
         </section>
       )}
 
