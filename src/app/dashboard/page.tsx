@@ -12,6 +12,8 @@ const MESSAGES: Record<string, string> = {
   "connected=google": "Google Calendar connected and synced.",
   "connected=github": "GitHub connected and synced.",
   "installed=github": "Vennata app installed on GitHub. Click Sync now (or Connect GitHub) to pull in those repos.",
+  "connected=slack": "Slack linked. Your activity counts from now on, in channels the Vennata bot is in.",
+  "installed=slack": "Vennata added to your Slack workspace and joined its public channels. Now click Connect Slack so your own activity is counted.",
   "error=cancelled": "Connection cancelled.",
   "error=state": "That connection link expired. Please try again.",
   "error=connect_failed": "Couldn't connect. Check the server logs for details.",
@@ -27,6 +29,7 @@ type Range = keyof typeof RANGES;
 const AVAILABLE_TOOLS = [
   { provider: "google", label: "Google Calendar" },
   { provider: "github", label: "GitHub" },
+  { provider: "slack", label: "Slack" },
 ];
 
 export default function DashboardPage({ searchParams }: PageProps<"/dashboard">) {
@@ -104,6 +107,10 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
   const commits = count("commit");
   const prsMerged = count("pr_merged");
   const reviews = count("review_given");
+  const slackMessages = count("message", "thread_reply");
+  const threadsStarted = count("thread_start");
+  const replies = count("thread_reply");
+  const reactions = count("reaction");
   const lines = linesOfCode(events.filter((e) => e.kind === "commit"));
   // Same number as the green squares on GitHub (a merged PR isn't a new contribution).
   const githubTotal = count("commit", "pr_opened", "review_given", "contribution");
@@ -172,6 +179,14 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
               <Stat label="lines removed" value={`−${formatInt(lines.removed)}`} />
             </div>
           )}
+          {connected.has("slack") && (
+            <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
+              <Stat label="Slack messages" value={formatInt(slackMessages)} />
+              <Stat label="threads started" value={formatInt(threadsStarted)} />
+              <Stat label="replies given" value={formatInt(replies)} />
+              <Stat label="reactions" value={formatInt(reactions)} />
+            </div>
+          )}
           <p className="text-xs text-neutral-500">
             Last {RANGES[range].label} · overlapping meetings counted once · lines only from repos with the Vennata app, huge generated commits skipped
           </p>
@@ -188,7 +203,9 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
                 <p className="text-xs text-neutral-500">
                   {c.status !== "active"
                     ? `Needs reconnecting (${c.status})`
-                    : c.last_synced_at
+                    : c.provider === "slack"
+                      ? "Live: counting as it happens"
+                      : c.last_synced_at
                       ? `Synced ${new Date(c.last_synced_at).toLocaleString()}`
                       : "Not synced yet"}
                 </p>
@@ -200,10 +217,21 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
                     Add repos or orgs
                   </a>
                 )}
-                <input type="hidden" name="connectionId" value={c.id} />
-                <button type="submit" className="rounded-full border border-neutral-300 px-4 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900">
-                  Sync now
-                </button>
+                {c.provider === "slack" && (
+                  // eslint-disable-next-line @next/next/no-html-link-for-pages
+                  <a href="/api/connect/slack?mode=install" className="text-xs text-neutral-500 underline hover:text-foreground">
+                    Add to a workspace
+                  </a>
+                )}
+                {/* Slack pushes events live, so there's nothing to sync. */}
+                {c.provider !== "slack" && (
+                  <>
+                    <input type="hidden" name="connectionId" value={c.id} />
+                    <button type="submit" className="rounded-full border border-neutral-300 px-4 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-900">
+                      Sync now
+                    </button>
+                  </>
+                )}
               </form>
             </li>
           ))}
@@ -221,6 +249,16 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
             </a>
           ))}
         </div>
+        {!connected.has("slack") && (
+          <p className="mt-3 text-xs text-neutral-500">
+            Slack admin?{" "}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a href="/api/connect/slack?mode=install" className="underline hover:text-foreground">
+              Add Vennata to your workspace
+            </a>{" "}
+            first, then everyone clicks Connect Slack to opt in.
+          </p>
+        )}
       </section>
 
       <section className="rounded-xl border border-neutral-200 p-5 dark:border-neutral-800">

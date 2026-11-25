@@ -4,7 +4,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getConnector, redirectUriFor } from "@/lib/connectors";
-import { saveConnection, syncConnection } from "@/lib/connections";
+import { saveConnection, saveWorkspaceInstall, syncConnection } from "@/lib/connections";
 
 export async function GET(
   request: NextRequest,
@@ -27,8 +27,10 @@ export async function GET(
   if (searchParams.get("error")) return finish("error=cancelled");
 
   const code = searchParams.get("code");
-  const state = searchParams.get("state");
-  const stateOk = Boolean(state) && state === savedState;
+  // state looks like "<random>" or "<random>.install".
+  const [stateBase, mode] = (searchParams.get("state") ?? "").split(".");
+  const stateOk = Boolean(stateBase) && stateBase === savedState;
+  const install = mode === "install";
 
   // GitHub redirects here after someone installs or reconfigures the app.
   // If we can't verify state, ignore the code and do nothing risky: just tell
@@ -44,7 +46,17 @@ export async function GET(
   if (!user) return NextResponse.redirect(new URL("/", request.url));
 
   try {
-    const result = await connector.exchangeCode(code, redirectUriFor(connector.provider));
+    const redirectUri = redirectUriFor(connector.provider);
+
+    // Workspace install (Slack): save the company's bot token. Each person
+    // still links their own account separately to be counted.
+    if (install && connector.exchangeInstall) {
+      const workspace = await connector.exchangeInstall(code, redirectUri);
+      await saveWorkspaceInstall(user.id, connector.provider, workspace);
+      return finish(`installed=${provider}`);
+    }
+
+    const result = await connector.exchangeCode(code, redirectUri);
     const connectionId = await saveConnection(user.id, connector.provider, result);
     await syncConnection(connectionId, user.id);
   } catch (e) {

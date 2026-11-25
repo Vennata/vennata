@@ -5,7 +5,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { getConnector } from "@/lib/connectors";
-import type { ExternalAccount, OAuthTokens, Provider } from "@/lib/connectors/types";
+import type { ExternalAccount, OAuthTokens, Provider, WorkspaceInstall } from "@/lib/connectors/types";
 
 const BACKFILL_DAYS = 365;
 
@@ -59,6 +59,35 @@ export async function saveConnection(
 
   await storeTokens(connection.id, tokens);
   return connection.id;
+}
+
+export async function saveWorkspaceInstall(
+  userId: string,
+  provider: Provider,
+  workspace: WorkspaceInstall,
+) {
+  const db = createAdminClient();
+  const { data: membership } = await db
+    .from("memberships")
+    .select("company_id, companies!inner(is_personal)")
+    .eq("user_id", userId)
+    .eq("companies.is_personal", true)
+    .single();
+  if (!membership) throw new ConnectionError("No personal space found");
+
+  // Reinstalling (e.g. to add permissions) replaces the old bot token.
+  const { error } = await db.from("workspace_installs").upsert(
+    {
+      provider,
+      external_workspace_id: workspace.workspaceId,
+      company_id: membership.company_id,
+      installed_by: userId,
+      bot_token_encrypted: encrypt(workspace.botToken),
+      scopes: workspace.scopes,
+    },
+    { onConflict: "provider,external_workspace_id" },
+  );
+  if (error) throw new ConnectionError(`Saving workspace install failed: ${error.message}`);
 }
 
 async function storeTokens(connectionId: string, tokens: OAuthTokens) {

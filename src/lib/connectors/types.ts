@@ -38,6 +38,12 @@ export interface ActivityEventInput {
   linesRemoved?: number;
 }
 
+export interface WorkspaceInstall {
+  workspaceId: string;
+  botToken: string;
+  scopes: string[];
+}
+
 export interface FetchResult {
   events: ActivityEventInput[];
   from: Date; // the time window covered; existing rows in it get replaced
@@ -50,7 +56,11 @@ export interface Connector {
   getAuthUrl(state: string, redirectUri: string): string;
   // For tools installed on an org/workspace (GitHub Apps, Slack apps):
   // where an admin (or a user, on their own account) installs the app.
-  getInstallUrl?(state: string): string;
+  getInstallUrl?(state: string, redirectUri: string): string;
+  // If the install flow returns a workspace-level token (Slack's bot token),
+  // the connector exchanges it here. Tools without one (GitHub) skip this and
+  // the install callback falls through to exchangeCode.
+  exchangeInstall?(code: string, redirectUri: string): Promise<WorkspaceInstall>;
   exchangeCode(code: string, redirectUri: string): Promise<{ tokens: OAuthTokens; account: ExternalAccount }>;
   refreshTokens(refreshToken: string): Promise<OAuthTokens>;
   fetchActivity(accessToken: string, since: Date): Promise<FetchResult>;

@@ -1,6 +1,7 @@
 import "server-only";
 import { githubConnector } from "./github";
 import { googleConnector } from "./google";
+import { slackConnector } from "./slack";
 import type { Connector, Provider } from "./types";
 import { siteUrl } from "@/lib/site";
 
@@ -8,6 +9,7 @@ import { siteUrl } from "@/lib/site";
 const connectors: Partial<Record<Provider, Connector>> = {
   google: googleConnector,
   github: githubConnector,
+  slack: slackConnector,
 };
 
 export function getConnector(provider: string): Connector | null {
