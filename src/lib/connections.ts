@@ -143,14 +143,18 @@ export async function syncConnection(connectionId: string, userId: string): Prom
   const since = new Date(Date.now() - BACKFILL_DAYS * 24 * 60 * 60 * 1000);
   const result = await getConnector(provider)!.fetchActivity(accessToken, since);
 
-  // Replace everything in the synced window. That way meetings that were
+  // Default: replace everything in the synced window, so meetings that were
   // cancelled or moved since the last sync don't linger as stale rows.
-  const { error: deleteError } = await db
-    .from("activity_events")
-    .delete()
-    .eq("connection_id", connection.id)
-    .gte("started_at", result.from.toISOString());
-  if (deleteError) throw new ConnectionError(`Clearing old events failed: ${deleteError.message}`);
+  // Merge mode (Slack): only add what's missing, keeping events that were
+  // counted live and that the fetch can't see (reactions, threads started).
+  if (!result.merge) {
+    const { error: deleteError } = await db
+      .from("activity_events")
+      .delete()
+      .eq("connection_id", connection.id)
+      .gte("started_at", result.from.toISOString());
+    if (deleteError) throw new ConnectionError(`Clearing old events failed: ${deleteError.message}`);
+  }
 
   const rows = result.events.map((e) => ({
     user_id: connection.user_id,
@@ -171,7 +175,13 @@ export async function syncConnection(connectionId: string, userId: string): Prom
 
   // Insert in chunks so one huge request doesn't time out.
   for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await db.from("activity_events").insert(rows.slice(i, i + 500));
+    const chunk = rows.slice(i, i + 500);
+    const { error } = result.merge
+      ? await db.from("activity_events").upsert(chunk, {
+          onConflict: "connection_id,kind,external_id",
+          ignoreDuplicates: true,
+        })
+      : await db.from("activity_events").insert(chunk);
     if (error) throw new ConnectionError(`Saving events failed: ${error.message}`);
   }
 

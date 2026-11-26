@@ -131,13 +131,77 @@ export const slackConnector: Connector = {
     throw new Error("Slack bot tokens don't expire");
   },
 
-  // Events are pushed to /api/slack/events in real time, so "Sync now" has
-  // nothing to fetch. An empty window means nothing gets deleted either.
-  async fetchActivity() {
-    const now = new Date();
-    return { events: [], from: now, to: now };
+  // Backfill: live events only start at install, so on connect we search for
+  // this person's OWN past messages (search is the one Slack history API
+  // that isn't heavily rate-limited for apps like ours). Kept only if they
+  // were in a channel the bot is in, so history matches what live counting
+  // covers; DMs are always skipped. Reactions and "threads started" can't be
+  // found this way, so those still start at install.
+  async fetchActivity(userToken, since) {
+    const to = new Date();
+    const me = await slackApi<SlackResponse & { user_id: string; team_id: string }>(
+      "auth.test", {}, userToken,
+    );
+    const token = await botToken(me.team_id);
+    const botChannels = token ? await memberChannelIds(token) : new Set<string>();
+
+    const events: ActivityEventInput[] = [];
+    const after = new Date(since.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    for (let page = 1, pages = 1; page <= pages && page <= MAX_SEARCH_PAGES; page++) {
+      const r = await searchPage(userToken, `from:<@${me.user_id}> after:${after}`, page);
+      pages = r.messages.paging.pages;
+      for (const m of r.messages.matches) {
+        if (m.channel.is_im || m.channel.is_mpim || !botChannels.has(m.channel.id)) continue;
+        const startedAt = slackTime(m.ts);
+        if (startedAt < since) continue;
+        // A reply's permalink carries its parent's thread_ts.
+        const threadTs = m.permalink ? new URL(m.permalink).searchParams.get("thread_ts") : null;
+        events.push({
+          kind: threadTs && threadTs !== m.ts ? "thread_reply" : "message",
+          externalId: `${m.channel.id}:${m.ts}`, // same id as live events: no double counting
+          startedAt,
+        });
+      }
+    }
+    return { events, from: since, to, merge: true };
   },
 };
+
+// 100 results per page; 50 pages = 5,000 messages, plenty for a first poster.
+const MAX_SEARCH_PAGES = 50;
+
+interface SearchMatch {
+  ts: string;
+  permalink?: string;
+  channel: { id: string; is_im?: boolean; is_mpim?: boolean };
+  // `text` is in the response too. We never touch it.
+}
+
+async function searchPage(userToken: string, query: string, page: number) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await slackApi<SlackResponse & {
+        messages: { matches: SearchMatch[]; paging: { pages: number } };
+      }>("search.messages", { query, count: "100", page: String(page), sort: "timestamp" }, userToken);
+    } catch (e) {
+      // Slack says "ratelimited" when we're going too fast: wait and retry.
+      if (attempt < 3 && e instanceof Error && e.message.includes("ratelimited")) {
+        await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
+async function memberChannelIds(botToken: string): Promise<Set<string>> {
+  const list = await slackApi<SlackResponse & { channels: { id: string; is_member: boolean }[] }>(
+    "conversations.list",
+    { types: "public_channel,private_channel", exclude_archived: "true", limit: "1000" },
+    botToken,
+  );
+  return new Set(list.channels.filter((c) => c.is_member).map((c) => c.id));
+}
 
 // The bot only receives events from channels it's in. When an admin connects,
 // joining every public channel means nobody has to /invite it one by one.

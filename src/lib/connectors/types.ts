@@ -49,6 +49,7 @@ export interface FetchResult {
   events: ActivityEventInput[];
   from: Date; // the time window covered; existing rows in it get replaced
   to: Date;
+  merge?: boolean; // add missing rows only, never delete (see syncConnection)
   timezone?: string;
 }
 
