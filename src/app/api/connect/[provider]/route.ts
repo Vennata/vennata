@@ -18,9 +18,9 @@ export async function GET(request: NextRequest, ctx: RouteContext<"/api/connect/
   // the callback belongs to a flow *we* started (prevents CSRF attacks).
   const state = randomBytes(16).toString("hex");
 
-  // ?mode=install sends the user to install the app on a workspace/org
-  // (Slack, GitHub) instead of just linking their account. ".install" rides
-  // along on state so the callback knows which flow it's finishing.
+  // ?mode=install sends the user to install the app on an account/org
+  // (GitHub) instead of just authorizing. ".install" on state is just a
+  // label; the callback checks only the random part.
   const install = request.nextUrl.searchParams.get("mode") === "install";
   const redirectUri = redirectUriFor(connector.provider);
   const url = install && connector.getInstallUrl

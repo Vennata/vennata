@@ -1,9 +1,12 @@
-// Slack connector. Two separate flows:
-//   * INSTALL (getInstallUrl): someone adds the Vennata app to a workspace.
-//     We get a bot token, the bot joins public channels, and Slack starts
-//     sending us events (see handleSlackEvent below).
-//   * LINK (getAuthUrl): "Sign in with Slack". Tells us which Slack user is
-//     which Vennata user. Only linked users' activity is ever counted.
+// Slack connector. One "Connect Slack" click does two things in a single
+// Slack approval screen:
+//   * installs the Vennata app on the workspace (if it isn't already): we get
+//     a bot token, the bot joins public channels, and Slack starts sending us
+//     events (see handleSlackEvent below)
+//   * links the person who approved: Slack tells us their user id, so their
+//     activity is counted. Only linked people are ever counted (opt-in).
+// Teammates click the same button later; the app is already there, so for
+// them it just links their account.
 //
 // Slack doesn't let non-Marketplace apps read message history at a useful
 // rate, so counting starts at install and there's nothing to backfill.
@@ -56,17 +59,6 @@ export const slackConnector: Connector = {
 
   getAuthUrl(state, redirectUri) {
     const params = new URLSearchParams({
-      response_type: "code",
-      scope: "openid email profile",
-      client_id: process.env.SLACK_CLIENT_ID!,
-      redirect_uri: redirectUri,
-      state,
-    });
-    return `https://slack.com/openid/connect/authorize?${params}`;
-  },
-
-  getInstallUrl(state, redirectUri) {
-    const params = new URLSearchParams({
       client_id: process.env.SLACK_CLIENT_ID!,
       scope: BOT_SCOPES.join(","),
       redirect_uri: redirectUri,
@@ -75,31 +67,33 @@ export const slackConnector: Connector = {
     return `https://slack.com/oauth/v2/authorize?${params}`;
   },
 
-  async exchangeInstall(code, redirectUri) {
-    const r = await slackApi<SlackResponse & {
-      access_token: string; scope: string; team: { id: string };
-    }>("oauth.v2.access", oauthParams(code, redirectUri));
-    await joinPublicChannels(r.access_token);
-    return { workspaceId: r.team.id, botToken: r.access_token, scopes: r.scope.split(",") };
-  },
-
   async exchangeCode(code, redirectUri) {
-    const t = await slackApi<SlackResponse & { access_token: string }>(
-      "openid.connect.token", oauthParams(code, redirectUri),
-    );
-    const info = await slackApi<SlackResponse & {
-      sub: string; email?: string; "https://slack.com/team_id": string;
-    }>("openid.connect.userInfo", {}, t.access_token);
+    const r = await slackApi<SlackResponse & {
+      access_token: string; scope: string; team: { id: string }; authed_user: { id: string };
+    }>("oauth.v2.access", oauthParams(code, redirectUri));
+
+    await joinPublicChannels(r.access_token);
+
+    // Who approved, and their email (for matching them across tools).
+    const me = await slackApi<SlackResponse & { user: { profile?: { email?: string } } }>(
+      "users.info", { user: r.authed_user.id }, r.access_token,
+    ).catch(() => null);
 
     return {
       // Slack user ids are only unique within a workspace, so include the team.
-      account: { id: `${info["https://slack.com/team_id"]}:${info.sub}`, email: info.email?.toLowerCase() ?? null },
-      tokens: { accessToken: t.access_token, refreshToken: null, expiresAt: null, scopes: ["openid", "email", "profile"] },
+      account: {
+        id: `${r.team.id}:${r.authed_user.id}`,
+        email: me?.user.profile?.email?.toLowerCase() ?? null,
+      },
+      // We never call Slack as the user, so there's no personal token; the
+      // connection keeps the workspace bot token (encrypted) instead.
+      tokens: { accessToken: r.access_token, refreshToken: null, expiresAt: null, scopes: r.scope.split(",") },
+      workspace: { workspaceId: r.team.id, botToken: r.access_token, scopes: r.scope.split(",") },
     };
   },
 
   async refreshTokens() {
-    throw new Error("Slack sign-in tokens don't expire");
+    throw new Error("Slack bot tokens don't expire");
   },
 
   // Events are pushed to /api/slack/events in real time, so "Sync now" has

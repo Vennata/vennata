@@ -28,9 +28,8 @@ export async function GET(
 
   const code = searchParams.get("code");
   // state looks like "<random>" or "<random>.install".
-  const [stateBase, mode] = (searchParams.get("state") ?? "").split(".");
+  const stateBase = (searchParams.get("state") ?? "").split(".")[0];
   const stateOk = Boolean(stateBase) && stateBase === savedState;
-  const install = mode === "install";
 
   // GitHub redirects here after someone installs or reconfigures the app.
   // If we can't verify state, ignore the code and do nothing risky: just tell
@@ -46,17 +45,8 @@ export async function GET(
   if (!user) return NextResponse.redirect(new URL("/", request.url));
 
   try {
-    const redirectUri = redirectUriFor(connector.provider);
-
-    // Workspace install (Slack): save the company's bot token. Each person
-    // still links their own account separately to be counted.
-    if (install && connector.exchangeInstall) {
-      const workspace = await connector.exchangeInstall(code, redirectUri);
-      await saveWorkspaceInstall(user.id, connector.provider, workspace);
-      return finish(`installed=${provider}`);
-    }
-
-    const result = await connector.exchangeCode(code, redirectUri);
+    const result = await connector.exchangeCode(code, redirectUriFor(connector.provider));
+    if (result.workspace) await saveWorkspaceInstall(user.id, connector.provider, result.workspace);
     const connectionId = await saveConnection(user.id, connector.provider, result);
     await syncConnection(connectionId, user.id);
   } catch (e) {

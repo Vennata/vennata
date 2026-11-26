@@ -12,8 +12,7 @@ const MESSAGES: Record<string, string> = {
   "connected=google": "Google Calendar connected and synced.",
   "connected=github": "GitHub connected and synced.",
   "installed=github": "Vennata app installed on GitHub. Click Sync now (or Connect GitHub) to pull in those repos.",
-  "connected=slack": "Slack linked. Your activity counts from now on, in channels the Vennata bot is in.",
-  "installed=slack": "Vennata added to your Slack workspace and joined its public channels. Now click Connect Slack so your own activity is counted.",
+  "connected=slack": "Slack connected. Vennata joined your public channels, and your activity counts from now on.",
   "error=cancelled": "Connection cancelled.",
   "error=state": "That connection link expired. Please try again.",
   "error=connect_failed": "Couldn't connect. Check the server logs for details.",
@@ -217,12 +216,6 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
                     Add repos or orgs
                   </a>
                 )}
-                {c.provider === "slack" && (
-                  // eslint-disable-next-line @next/next/no-html-link-for-pages
-                  <a href="/api/connect/slack?mode=install" className="text-xs text-neutral-500 underline hover:text-foreground">
-                    Add to a workspace
-                  </a>
-                )}
                 {/* Slack pushes events live, so there's nothing to sync. */}
                 {c.provider !== "slack" && (
                   <>
@@ -249,16 +242,6 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
             </a>
           ))}
         </div>
-        {!connected.has("slack") && (
-          <p className="mt-3 text-xs text-neutral-500">
-            Slack admin?{" "}
-            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
-            <a href="/api/connect/slack?mode=install" className="underline hover:text-foreground">
-              Add Vennata to your workspace
-            </a>{" "}
-            first, then everyone clicks Connect Slack to opt in.
-          </p>
-        )}
       </section>
 
       <section className="rounded-xl border border-neutral-200 p-5 dark:border-neutral-800">

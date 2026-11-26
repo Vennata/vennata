@@ -1,16 +1,23 @@
 {
-  "_metadata": { "major_version": 2 },
+  "_metadata": {
+    "major_version": 2
+  },
   "display_information": {
     "name": "Vennata",
     "description": "Fun recap posters for your work. Counts activity (never reads messages).",
-    "long_description": "Vennata turns your team's work activity into shareable recap posters. In Slack it counts messages, threads and reactions for people who opt in by linking their account. It never reads, stores or logs message text. Everyone else's activity is ignored.",
+    "long_description": "Vennata turns your team's work activity into shareable recap posters. In Slack it counts messages, threads and reactions for people who opt in by clicking Connect Slack. It never reads, stores or logs message text. Everyone else's activity is ignored.",
     "background_color": "#111111"
   },
   "features": {
-    "bot_user": { "display_name": "Vennata", "always_online": false }
+    "bot_user": {
+      "display_name": "Vennata",
+      "always_online": false
+    }
   },
   "oauth_config": {
-    "redirect_urls": ["https://vennata.vercel.app/api/connect/slack/callback"],
+    "redirect_urls": [
+      "https://vennata.vercel.app/api/connect/slack/callback"
+    ],
     "scopes": {
       "bot": [
         "channels:history",
@@ -20,14 +27,17 @@
         "reactions:read",
         "users:read",
         "users:read.email"
-      ],
-      "user": ["openid", "email", "profile"]
+      ]
     }
   },
   "settings": {
     "event_subscriptions": {
       "request_url": "https://vennata.vercel.app/api/slack/events",
-      "bot_events": ["message.channels", "message.groups", "reaction_added"]
+      "bot_events": [
+        "message.channels",
+        "message.groups",
+        "reaction_added"
+      ]
     },
     "org_deploy_enabled": false,
     "socket_mode_enabled": false,

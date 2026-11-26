@@ -54,14 +54,16 @@ export interface FetchResult {
 export interface Connector {
   provider: Provider;
   getAuthUrl(state: string, redirectUri: string): string;
-  // For tools installed on an org/workspace (GitHub Apps, Slack apps):
-  // where an admin (or a user, on their own account) installs the app.
+  // For tools installed separately from connecting (GitHub Apps): where an
+  // admin (or a user, on their own account) installs the app.
   getInstallUrl?(state: string, redirectUri: string): string;
-  // If the install flow returns a workspace-level token (Slack's bot token),
-  // the connector exchanges it here. Tools without one (GitHub) skip this and
-  // the install callback falls through to exchangeCode.
-  exchangeInstall?(code: string, redirectUri: string): Promise<WorkspaceInstall>;
-  exchangeCode(code: string, redirectUri: string): Promise<{ tokens: OAuthTokens; account: ExternalAccount }>;
+  // `workspace` is set when connecting also installed an app on a whole
+  // workspace (Slack): its bot token belongs to the company, not the person.
+  exchangeCode(code: string, redirectUri: string): Promise<{
+    tokens: OAuthTokens;
+    account: ExternalAccount;
+    workspace?: WorkspaceInstall;
+  }>;
   refreshTokens(refreshToken: string): Promise<OAuthTokens>;
   fetchActivity(accessToken: string, since: Date): Promise<FetchResult>;
 }
