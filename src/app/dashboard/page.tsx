@@ -12,7 +12,8 @@ const MESSAGES: Record<string, string> = {
   "connected=google": "Google Calendar connected and synced.",
   "connected=github": "GitHub connected and synced.",
   "installed=github": "Vennata app installed on GitHub. Click Sync now (or Connect GitHub) to pull in those repos.",
-  "connected=slack": "Slack connected. Vennata joined your public channels, and your activity counts from now on.",
+  "connected=slack": "Slack connected! Your activity counts from now on, in channels the Vennata bot is in.",
+  "notice=slack_member": "Slack connected! Since you're not a Slack admin, Vennata hasn't joined any channels yet. Ask an admin to click Connect Slack, or type /invite @Vennata in channels you're in.",
   "error=cancelled": "Connection cancelled.",
   "error=state": "That connection link expired. Please try again.",
   "error=connect_failed": "Couldn't connect. Check the server logs for details.",
@@ -55,7 +56,9 @@ async function Dashboard({ searchParams }: { searchParams: PageProps<"/dashboard
 
   const params = await searchParams;
   const range: Range = params.range === "12m" ? "12m" : "30d";
+  // A specific notice (e.g. "ask your Slack admin") wins over the generic one.
   const message = Object.entries(params)
+    .sort(([a]) => (a === "notice" ? -1 : 1))
     .map(([k, v]) => MESSAGES[`${k}=${v}`])
     .find(Boolean);
 

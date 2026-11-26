@@ -1,8 +1,9 @@
 // Slack connector. One "Connect Slack" click does two things in a single
 // Slack approval screen:
 //   * installs the Vennata app on the workspace (if it isn't already): we get
-//     a bot token, the bot joins public channels, and Slack starts sending us
-//     events (see handleSlackEvent below)
+//     a bot token and Slack starts sending us events (handleSlackEvent below).
+//     If the person is a Slack admin, the bot also joins every public channel;
+//     a regular member can't add a bot everywhere on the company's behalf.
 //   * links the person who approved: Slack tells us their user id, so their
 //     activity is counted. Only linked people are ever counted (opt-in).
 // Teammates click the same button later; the app is already there, so for
@@ -13,13 +14,16 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt } from "@/lib/crypto";
+import { siteUrl } from "@/lib/site";
 import type { ActivityEventInput, Connector } from "./types";
 
 // Bot permissions. history scopes are needed to RECEIVE message events in
 // channels the bot is in; we still never read or store the text.
 const BOT_SCOPES = [
   "channels:history", "groups:history", // message events (public / private channels)
-  "channels:read", "channels:join",     // find and join public channels
+  "channels:read", "groups:read",       // see channels + "bot joined" events
+  "channels:join",                      // admin installs: join public channels
+  "chat:write",                         // post the intro message when joining
   "reactions:read",                     // reaction events
   "users:read", "users:read.email",     // map Slack users to emails (#1 collaborator)
 ];
@@ -72,12 +76,11 @@ export const slackConnector: Connector = {
       access_token: string; scope: string; team: { id: string }; authed_user: { id: string };
     }>("oauth.v2.access", oauthParams(code, redirectUri));
 
-    await joinPublicChannels(r.access_token);
-
-    // Who approved, and their email (for matching them across tools).
-    const me = await slackApi<SlackResponse & { user: { profile?: { email?: string } } }>(
-      "users.info", { user: r.authed_user.id }, r.access_token,
-    ).catch(() => null);
+    // Who approved: their email (for matching across tools) and whether
+    // they're a Slack admin (decides if the bot joins every channel).
+    const me = await slackApi<SlackResponse & {
+      user: { is_admin?: boolean; is_owner?: boolean; profile?: { email?: string } };
+    }>("users.info", { user: r.authed_user.id }, r.access_token).catch(() => null);
 
     return {
       // Slack user ids are only unique within a workspace, so include the team.
@@ -88,8 +91,30 @@ export const slackConnector: Connector = {
       // We never call Slack as the user, so there's no personal token; the
       // connection keeps the workspace bot token (encrypted) instead.
       tokens: { accessToken: r.access_token, refreshToken: null, expiresAt: null, scopes: r.scope.split(",") },
-      workspace: { workspaceId: r.team.id, botToken: r.access_token, scopes: r.scope.split(",") },
+      workspace: {
+        workspaceId: r.team.id,
+        botToken: r.access_token,
+        scopes: r.scope.split(","),
+        installerIsAdmin: Boolean(me?.user.is_admin || me?.user.is_owner),
+      },
     };
+  },
+
+  // Runs after the bot token is saved (the "bot joined" events that follow
+  // need it to post the intro message).
+  async afterInstall(workspace) {
+    if (workspace.installerIsAdmin) {
+      await joinPublicChannels(workspace.botToken);
+      return;
+    }
+    // A regular member connected. If no admin has set the bot up yet, tell
+    // them how, instead of silently counting nothing.
+    const list = await slackApi<SlackResponse & { channels: { is_member: boolean }[] }>(
+      "conversations.list",
+      { types: "public_channel,private_channel", exclude_archived: "true", limit: "200" },
+      workspace.botToken,
+    ).catch(() => null);
+    if (!list?.channels.some((c) => c.is_member)) return "slack_member";
   },
 
   async refreshTokens() {
@@ -104,9 +129,9 @@ export const slackConnector: Connector = {
   },
 };
 
-// The bot only receives events from channels it's in. Joining every public
-// channel on install means nobody has to /invite it one by one. (Private
-// channels still need an invite, which is the right call for privacy.)
+// The bot only receives events from channels it's in. When an admin connects,
+// joining every public channel means nobody has to /invite it one by one.
+// (Private channels still need an invite, which is the right call for privacy.)
 async function joinPublicChannels(botToken: string) {
   const list = await slackApi<SlackResponse & { channels: { id: string; is_member: boolean }[] }>(
     "conversations.list",
@@ -143,7 +168,13 @@ const COUNTED_SUBTYPES = new Set([undefined, "thread_broadcast", "file_share"]);
 
 const slackTime = (ts: string) => new Date(parseFloat(ts) * 1000);
 
-export async function handleSlackEvent(teamId: string, event: SlackEvent) {
+export async function handleSlackEvent(teamId: string, event: SlackEvent, botUserId?: string) {
+  // The bot itself joined a channel (auto-join or someone's /invite): say hi.
+  if (event.type === "member_joined_channel" && event.user && event.user === botUserId && event.channel) {
+    await postIntro(teamId, event.channel);
+    return;
+  }
+
   if (event.bot_id || event.channel_type === "im") return;
 
   if (event.type === "message" && COUNTED_SUBTYPES.has(event.subtype) && event.user && event.ts) {
@@ -178,6 +209,26 @@ export async function handleSlackEvent(teamId: string, event: SlackEvent) {
       participantEmails: await emailsFor(teamId, others),
     });
   }
+}
+
+// Posted once in every channel the bot joins, so nobody wonders what this
+// bot is or whether it's reading their messages.
+async function postIntro(teamId: string, channel: string) {
+  const token = await botToken(teamId);
+  if (!token) return;
+  const site = siteUrl();
+  const text = [
+    "👋 Hey everyone! I'm *Vennata*. I make fun recap posters of your work, kind of like Spotify Wrapped but for your job (meetings, messages, code and more).",
+    "",
+    "*Here's exactly what I do in this channel:*",
+    "• I only count activity for people who *choose to join* by clicking *Connect Slack*. If you don't, I ignore you completely.",
+    "• I count *how much*, never *what*: how many messages, replies and reactions. I never save or share what you write.",
+    "• Your posters stay *private* unless you decide to share them.",
+    "",
+    `Want your own recap? Grab it at <${site}|${site.replace(/^https?:\/\//, "")}> 🎉`,
+    "Not interested? No need to do anything. You're never counted unless you opt in.",
+  ].join("\n");
+  await slackApi("chat.postMessage", { channel, text, unfurl_links: "false" }, token);
 }
 
 // Saves an event ONLY if this Slack user linked their Vennata account.

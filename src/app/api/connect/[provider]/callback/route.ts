@@ -44,9 +44,13 @@ export async function GET(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.redirect(new URL("/", request.url));
 
+  let notice: string | void = undefined;
   try {
     const result = await connector.exchangeCode(code, redirectUriFor(connector.provider));
-    if (result.workspace) await saveWorkspaceInstall(user.id, connector.provider, result.workspace);
+    if (result.workspace) {
+      await saveWorkspaceInstall(user.id, connector.provider, result.workspace);
+      notice = await connector.afterInstall?.(result.workspace);
+    }
     const connectionId = await saveConnection(user.id, connector.provider, result);
     await syncConnection(connectionId, user.id);
   } catch (e) {
@@ -54,5 +58,5 @@ export async function GET(
     return finish("error=connect_failed");
   }
 
-  return finish(`connected=${provider}`);
+  return finish(`connected=${provider}${notice ? `&notice=${notice}` : ""}`);
 }

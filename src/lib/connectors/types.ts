@@ -42,6 +42,7 @@ export interface WorkspaceInstall {
   workspaceId: string;
   botToken: string;
   scopes: string[];
+  installerIsAdmin?: boolean;
 }
 
 export interface FetchResult {
@@ -64,6 +65,9 @@ export interface Connector {
     account: ExternalAccount;
     workspace?: WorkspaceInstall;
   }>;
+  // Optional setup once a workspace install is saved. Can return a notice key
+  // for the dashboard (e.g. "slack_member": ask an admin to finish setup).
+  afterInstall?(workspace: WorkspaceInstall): Promise<string | void>;
   refreshTokens(refreshToken: string): Promise<OAuthTokens>;
   fetchActivity(accessToken: string, since: Date): Promise<FetchResult>;
 }

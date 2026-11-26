@@ -23,7 +23,9 @@
         "channels:history",
         "groups:history",
         "channels:read",
+        "groups:read",
         "channels:join",
+        "chat:write",
         "reactions:read",
         "users:read",
         "users:read.email"
@@ -36,7 +38,8 @@
       "bot_events": [
         "message.channels",
         "message.groups",
-        "reaction_added"
+        "reaction_added",
+        "member_joined_channel"
       ]
     },
     "org_deploy_enabled": false,

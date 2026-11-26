@@ -45,7 +45,9 @@ export async function POST(request: NextRequest) {
   if (payload.type === "event_callback") {
     after(async () => {
       try {
-        await handleSlackEvent(payload.team_id, payload.event);
+        // authorizations[0] is our bot in this workspace; used to spot when
+        // the bot itself joins a channel.
+        await handleSlackEvent(payload.team_id, payload.event, payload.authorizations?.[0]?.user_id);
       } catch (e) {
         // Log the error only, never the payload: it contains message text.
         console.error("[slack:event]", e instanceof Error ? e.message : e);
