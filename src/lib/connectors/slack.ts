@@ -218,7 +218,7 @@ async function postIntro(teamId: string, channel: string) {
   if (!token) return;
   const site = siteUrl();
   const text = [
-    "👋 Hey everyone! I'm *Vennata*. I make fun recap posters of your work, kind of like Spotify Wrapped but for your job (meetings, messages, code and more).",
+    "👋 Hey everyone! I'm *Vennata*. I turn your work into fun recap posters you can look back on and share (meetings, messages, code and more).",
     "",
     "*Here's exactly what I do in this channel:*",
     "• I only count activity for people who *choose to join* by clicking *Connect Slack*. If you don't, I ignore you completely.",
