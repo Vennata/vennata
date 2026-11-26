@@ -28,6 +28,8 @@ const BOT_SCOPES = [
   "users:read", "users:read.email",     // map Slack users to emails (#1 collaborator)
 ];
 
+const USER_SCOPES = ["search:read"];
+
 interface SlackResponse {
   ok: boolean;
   error?: string;
@@ -65,6 +67,9 @@ export const slackConnector: Connector = {
     const params = new URLSearchParams({
       client_id: process.env.SLACK_CLIENT_ID!,
       scope: BOT_SCOPES.join(","),
+      // Personal permission: lets us find this person's OWN past messages so
+      // their first poster isn't empty (Slack starts sending events at install).
+      user_scope: USER_SCOPES.join(","),
       redirect_uri: redirectUri,
       state,
     });
@@ -73,7 +78,8 @@ export const slackConnector: Connector = {
 
   async exchangeCode(code, redirectUri) {
     const r = await slackApi<SlackResponse & {
-      access_token: string; scope: string; team: { id: string }; authed_user: { id: string };
+      access_token: string; scope: string; team: { id: string };
+      authed_user: { id: string; access_token?: string; scope?: string };
     }>("oauth.v2.access", oauthParams(code, redirectUri));
 
     // Who approved: their email (for matching across tools) and whether
@@ -88,9 +94,13 @@ export const slackConnector: Connector = {
         id: `${r.team.id}:${r.authed_user.id}`,
         email: me?.user.profile?.email?.toLowerCase() ?? null,
       },
-      // We never call Slack as the user, so there's no personal token; the
-      // connection keeps the workspace bot token (encrypted) instead.
-      tokens: { accessToken: r.access_token, refreshToken: null, expiresAt: null, scopes: r.scope.split(",") },
+      // The person's own token (used only to search their past messages).
+      tokens: {
+        accessToken: r.authed_user.access_token ?? r.access_token,
+        refreshToken: null,
+        expiresAt: null,
+        scopes: r.authed_user.scope?.split(",") ?? [],
+      },
       workspace: {
         workspaceId: r.team.id,
         botToken: r.access_token,

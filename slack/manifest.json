@@ -29,6 +29,9 @@
         "reactions:read",
         "users:read",
         "users:read.email"
+      ],
+      "user": [
+        "search:read"
       ]
     }
   },
